@@ -50,4 +50,11 @@ WHERE support_response <> NULL
 ## 背景与动机
 
 LLM是自回归Transformer模型，基于一个prompt以及已经生成的token预测下一个token。
-token常用`Byte-Paired Encoding`。
+token是一组字符的表示，常用[Byte-Paired Encoding](https://huggingface.co/learn/nlp-course/en/chapter6/5)，平均4个英语字符。
+
+# 背景知识
+
+## BPE
+
+参见：https://huggingface.co/learn/nlp-course/en/chapter6/5
+

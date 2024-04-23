@@ -302,3 +302,60 @@ translator = pipeline("translation", model="Helsinki-NLP/opus-mt-fr-en")
 # [{'translation_text': 'This course is produced by Hugging Face.'}]
 translator("Ce cours est produit par Hugging Face.")
 ```
+
+### Transformer工作原理
+
+Transformer架构在2017年提出，当初用作翻译。接下来就出现了一些有影响力的后继工作。
+这里给出的不够新，[AI / ML / LLM / Transformer Models Timeline and List](https://ai.v-gar.de/ml/transformer/timeline/)更详细地整理了最新的工作。
+1. 2018年6月：GPT。第一个预训练Transformer模型，并且面向各种NLP任务做fine-tuning。
+2. 2018年10月：BERT。另一个预训练模型，更擅长总结。
+3. 2019年2月：GPT-2。更大的GPT。
+4. 2019年10月：DistilBERT。蒸馏版的BERT。相比BERT，快60%、省40%内存，97%的性能。
+5. 2019年10月：BART、T5。第一个使用exactly原版Transformer模型做预训练模型的工作。
+6. 2020年5月：GPT-3。比GPT-2更大。不需要fine-tuning就可以做各种任务（被称为zero-shot learning）
+7. **TODO**
+
+总得来说，可以分成三类：
+1. 类GPT（自回归Transformer模型）
+2. 类BERT（自编码Transformer模型）
+3. 类BART/T5（序列到序列Transformer模型）
+
+预训练模型是一种**自监督学习（Self-Supervised Learning）**。
+**预训练（Pretraining）**是从头从一个随机权重训练一个模型，没有任何先验知识。
+**微调（Fine-tuning）**是在模型预训练好之后的进一步训练。
+这是一种**迁移学习（Transfer learning）**的实践。
+
+Transformer模型主要有两个模块：
+1. 编码器（Encoder）：将输入映射到向量空间。该模型的优化目标是深入理解输入。
+2. 解码器（Decoder）：将编码器的输入结合其他的输入生成一个目标序列。该模型的优化目标是产生输出。
+
+这两个模块既可以单独使用也可以结合使用：
+1. 仅编码器：用于理解输入的场景，例如句子分类、NER等等。
+2. 仅解码器：用于生成式任务，例如文本生成。
+3. 编码器+解码器：也称为序列到序列模型（Sequence-to-Sequence model），用于翻译或者Summary。
+
+Transformer模型最大的特点是用了一个特殊的**Attention层**，该层帮助模型在句子里划重点。
+也就是说，在句子里告诉模型哪些词是需要特别注意的，哪些词是可以忽略的。
+以将"You like this course"翻译成法语为例。
+在翻译"like"这个单词时，需要特别注意"You"，因为它在法语的形态会和主语相关；但是其他的部分就没啥关系了。
+在翻译"this"这个单词时，需要特别注意"course"，因为它在法语的形态会和关联名词的阴阳性；其他部分没啥关系。
+对于一些更复杂的句子，可能需要注意到非常遥远的单词。
+
+最原始的Transformer架构主要用于翻译。
+
+
+# 提问
+
+## 为什么预训练模型是Self-Supervised Learning而不是Unsupervised Learning？
+
+预训练模型如何分类（Self-Supervised Learning 或者 Unsupervised Learning）主要取决于它们在学习过程中如何使用数据。这两种学习范式都不依赖于人工标注的数据，但在目标和方法上有所区别。下面是一些关键的区别：
+
+1. **Unsupervised Learning（无监督学习）**：
+   - 无监督学习的目标是在没有任何标签的情况下探索数据。这种方法通常用于聚类、密度估计或者降维。无监督学习试图在数据中找到某种结构，例如通过聚类相似的实例，或者通过主成分分析（PCA）找到数据的主要变化方向。
+   - 无监督学习的挑战在于模型必须自行决定数据的重要属性，因为没有标签或者反馈来指示哪些特征是有用的。
+
+2. **Self-Supervised Learning（自监督学习）**：
+   - 自监督学习是一种特殊类型的学习方法，属于监督学习的一种，但它使用数据本身生成伪标签来进行训练。在自监督学习中，输入数据被用来作为其自身的监督，例如，通过预测数据的某个部分（如遮蔽语言模型在NLP中的应用），或者预测数据中的序列（如在视频帧预测中）。
+   - 自监督学习的关键在于利用数据结构自身生成监督信号，使得模型能在没有外部标注的情况下学习到有用的特征。这种方法常用于预训练模型，以便在后续的监督学习任务中达到更好的性能。
+
+在预训练模型的上下文中，自监督学习提供了一种强大的方法来从未标记的数据中提取有用的特征。这使得预训练模型在接受少量标注数据进行微调时，能够显示出更好的性能。自监督学习在诸如自然语言处理（NLP）和计算机视觉等领域已经显示出巨大的潜力，因为它允许模型利用大量的未标记数据，从而学习到更深层次、更通用的数据表征。
