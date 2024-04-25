@@ -351,6 +351,9 @@ Transformer模型最大的特点是用了一个特殊的**Attention层**，该�
 3. 接下来会过一个"Multi-head Attention"，让模型能够同时从不同的子空间角度关注输入中的各个部分。具体地，输入的嵌入向量会被复制成多个“头”，并各自独立进行自注意力的计算，让每个头捕捉到输入数据的不同特征。
    1. [Self-Attention的结构（推荐阅读）](https://zhuanlan.zhihu.com/p/338817680)包含三个矩阵Wq、Wk、Wv。一批输入X通过定义的线性变换变为一批输出Q、K、V。然后输出是$softmax(\frac{QK^T}{\sqrt{d_k}})V$。第一步$QK^T$得到$n \times n$的矩阵（假设n为句子的单词数），表示单词之间的Attention强度。softmax让它变成概率分布。乘以V使得每个单词的向量等于根据Attention向量将其他所有的单词向量加权求和，也就是说按照这个Softmax做加权平均。简单地来说，**对于每个Query，与所有Key的点积来获取注意力分数，将这些分数通过Softmax来归一化之后，再按照Value向量求加权和，作为输出。**
    2. Multi-Head Attention包含多个Self-Attention层（记为h），同一个输入喂给$h$个Self-Attention层，产生的输出沿着特征维度拼接（单词数维度不变），做一个线性变换得到最终输出，并且输出矩阵的维度和输入矩阵的维度是一样的。
+4. 接下来会先做一个残差连接再做一个Layer Normalization
+   1. 在Transformer架构中，层归一化是一个重要组成部分，用于稳定训练过程，加速收敛，并提高模型的泛化能力。
+   2. 具体地，它会在多个样本间进行归一化，减少不同训练样本间的尺度差异。具体公式为：
 
 
 # 提问
