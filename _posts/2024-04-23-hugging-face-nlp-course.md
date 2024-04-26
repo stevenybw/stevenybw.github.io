@@ -305,6 +305,8 @@ translator("Ce cours est produit par Hugging Face.")
 
 ### Transformer工作原理
 
+Transformer工作原理强烈推荐[在Transformer架构中，第四步"残差连接"是做什么的？](https://zhuanlan.zhihu.com/p/338817680)，很清楚地说明了Transformer的宏观与微观的工作原理。
+
 Transformer架构在2017年提出，当初用作翻译。接下来就出现了一些有影响力的后继工作。
 这里给出的不够新，[AI / ML / LLM / Transformer Models Timeline and List](https://ai.v-gar.de/ml/transformer/timeline/)更详细地整理了最新的工作。
 1. 2018年6月：GPT。第一个预训练Transformer模型，并且面向各种NLP任务做fine-tuning。
@@ -351,12 +353,26 @@ Transformer模型最大的特点是用了一个特殊的**Attention层**，该�
 3. 接下来会过一个"Multi-head Attention"，让模型能够同时从不同的子空间角度关注输入中的各个部分。具体地，输入的嵌入向量会被复制成多个“头”，并各自独立进行自注意力的计算，让每个头捕捉到输入数据的不同特征。
    1. [Self-Attention的结构（推荐阅读）](https://zhuanlan.zhihu.com/p/338817680)包含三个矩阵Wq、Wk、Wv。一批输入X通过定义的线性变换变为一批输出Q、K、V。然后输出是$softmax(\frac{QK^T}{\sqrt{d_k}})V$。第一步$QK^T$得到$n \times n$的矩阵（假设n为句子的单词数），表示单词之间的Attention强度。softmax让它变成概率分布。乘以V使得每个单词的向量等于根据Attention向量将其他所有的单词向量加权求和，也就是说按照这个Softmax做加权平均。简单地来说，**对于每个Query，与所有Key的点积来获取注意力分数，将这些分数通过Softmax来归一化之后，再按照Value向量求加权和，作为输出。**
    2. Multi-Head Attention包含多个Self-Attention层（记为h），同一个输入喂给$h$个Self-Attention层，产生的输出沿着特征维度拼接（单词数维度不变），做一个线性变换得到最终输出，并且输出矩阵的维度和输入矩阵的维度是一样的。
-4. 接下来会先做一个残差连接再做一个Layer Normalization
+4. 接下来会先做一个残差连接
+   1. 残差连接的目的是缓解深层网络训练过程中的梯度消失问题，从而使得模型能够有效地训练更深的网络结构。
+   2. 残差连接的实现很简单，就是在网络的某几个层之后添加一个直接连接，将输入直接加到输出上。
+   3. 它可以防止训练过程中的梯度消失问题，允许梯度直接流过网络。
+   4. 它可以保持信息流，将输入与输出直接相加，可以保证至少有一部分原始信息不经修改地通过网络，有助于在处理复杂函数时保留必要的信息。
+   5. 它可以加速收敛，提供了一种额外的路径来快速调整网络权证。
+   6. 他可以提高模型性能。
+5. 接下来会再做一个Layer Normalization
    1. 在Transformer架构中，层归一化是一个重要组成部分，用于稳定训练过程，加速收敛，并提高模型的泛化能力。
-   2. 具体地，它会在多个样本间进行归一化，减少不同训练样本间的尺度差异。具体公式为：
+   2. 具体地，它会为每个样本独立地进行归一化，减少不同训练样本间的尺度差异。具体公式为：$LN(x_i) = \gamma (\frac{x_i - \mu}{\sqrt{\sigma^2 + \epsilon}}) + \beta$。其中，$\mu$和$\sigma$分别是当前样本所有特征的均值与方差，$\epsilon$避免除以零。$\gamma$和$\beta$是可学习的参数，允许Layer Norm在必要的标准化的同时保留网络必要的表达能力。
+6. 接下来会再做一个Feed Forward，由两层FC构成，一层有ReLU，第二层没有：$max(0, XW_1 + b_1)W_2 + b_2$。
 
+# 背景知识
 
-# 提问
+## Layer Normalization
+
+参见[这里](https://zhuanlan.zhihu.com/p/54530247)。Batch Normalization是将这个批次里的所有样本的同一个通道的特征做归一化。Layer Normalization是将同一个样本的不同通道做归一化。
+
+BN的问题是，当样本数很少时，均值和方差不能反映全局的统计分布信息。
+而且在RNN里，统计到靠后的时间片时，数据量也很少，此时BN的效果也不好。
 
 ## 为什么预训练模型是Self-Supervised Learning而不是Unsupervised Learning？
 
@@ -371,3 +387,68 @@ Transformer模型最大的特点是用了一个特殊的**Attention层**，该�
    - 自监督学习的关键在于利用数据结构自身生成监督信号，使得模型能在没有外部标注的情况下学习到有用的特征。这种方法常用于预训练模型，以便在后续的监督学习任务中达到更好的性能。
 
 在预训练模型的上下文中，自监督学习提供了一种强大的方法来从未标记的数据中提取有用的特征。这使得预训练模型在接受少量标注数据进行微调时，能够显示出更好的性能。自监督学习在诸如自然语言处理（NLP）和计算机视觉等领域已经显示出巨大的潜力，因为它允许模型利用大量的未标记数据，从而学习到更深层次、更通用的数据表征。
+
+### Encoder模型
+
+预训练通常是掩盖随机的单词让它预测。
+
+典型的有ALBERT、BERT、DistilBERT、ELECTRA等
+
+### Decoder模型
+
+预训练通常是预测句子中的下一个token。
+
+典型的有CTRL、GPT、GPT-2、Transformer XL
+
+### Sequence-to-sequence模型
+
+预训练通常是掩盖文本中的随机的一段话它预测。
+
+典型的有BART、mBART、Marian、T5
+
+## Chapter 2: Using Transformers
+
+Hugging Face Transformers库的目标是提供一个统一API，通过这个API，可以加载、训练、保存Transformer模型。具有以下特性：
+1. 易用性。两行代码，自动下载、加载、使用最新的NLP模型。
+2. 灵活性。所有模型都是PyTorch nn.Module或者TensorFlow tf.keras.Model类。
+3. 简单性。All in one file理念，模型的forward-pass定义在一个文件，易于理解与魔改。
+
+最后一个特性是Transformer区分于其他ML库的重要特性。通常，在一些深度学习框架中，为了代码复用和简洁，多个模型可能会共享一些通用的网络层或者模块。但是Hugging Face的理念是每个模型都是**自包含**的，便于用户阅读理解，也便于用户修改实验。
+
+本章会阐述如何用模型和Tokenizer复现`pipeline`函数。然后回深入学习Tokenizer API，它用在最开始和最后一步，负责在文本形式与数值形式之间转换。最后，我们会学习如何在一个批里发送多个句子。
+
+### Behind the pipeline
+
+在调用`pipeline("sentiment-analysis")`的背后，发生了以下事情：
+1. 通过Tokenizer将文本拆分成Token ID的序列。
+2. 将上述序列输入一个Model得到一个Logits向量。
+3. 通过一个分类器将Logits向量进行分类。
+
+#### Tokenizer：负责做预处理
+
+上述预处理方法需要和预训练模型保持**严格一致**，Hugging Face能自动帮你将模型匹配到对应的Tokenizer。
+
+```python
+from transformers import AutoTokenizer
+
+checkpoint = "distilbert-base-uncased-finetuned-sst-2-english"
+tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+raw_inputs = [
+    "I've been waiting for a HuggingFace course my whole life.",
+    "I hate this so much!",
+    "Hey you!",
+    "Aha!",
+    "Bowen!"
+]
+inputs = tokenizer(raw_inputs, padding=True, truncation=True, return_tensors="pt")
+input_ids = inputs["input_ids"]
+attention_mask = inputs["attention_mask"]
+
+print("\n\n\n".join([f"{x}\n{y}\n{z}" for (x, y, z) in zip(raw_inputs, input_ids, attention_mask)]))
+```
+
+通过执行上述程序观察到：
+1. Tokenizer API允许一次对
+
+#### Model：负责
+
