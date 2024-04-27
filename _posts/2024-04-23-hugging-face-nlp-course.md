@@ -448,7 +448,45 @@ print("\n\n\n".join([f"{x}\n{y}\n{z}" for (x, y, z) in zip(raw_inputs, input_ids
 ```
 
 通过执行上述程序观察到：
-1. Tokenizer API允许一次对
+1. Tokenizer API允许一次处理多个句子，并产生一个张量。由于句子的长度不一样，会以最大字符串长度来做**padding**，并且通过**masking**来保证正确性。
 
-#### Model：负责
+#### Model
+
+这里的模型指的是**base model**，只会产生**隐藏层**的特征向量，而不是最终的结果。
+通常在实际使用中会根据不同的task给隐藏层再加各种**head**。
+
+输出是一个三维张量：批大小 * 最大序列长度 * 特征维度（通常小模型是768，大一些的可能会到3072）。
+
+
+```python
+from transformers import AutoTokenizer
+from transformers import AutoModel
+
+checkpoint = "distilbert-base-uncased-finetuned-sst-2-english"
+model = AutoModel.from_pretrained(checkpoint)
+tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+raw_inputs = [
+    "I've been waiting for a HuggingFace course my whole life.",
+    "I hate this so much!",
+    "Hey you!",
+    "Aha!",
+    "Bowen!"
+]
+inputs = tokenizer(raw_inputs, padding=True, truncation=True, return_tensors="pt")
+outputs = model(**inputs)
+
+# torch.Size([5, 16, 768])
+print(outputs.last_hidden_state.shape)
+
+from transformers import AutoModelForSequenceClassification
+model = AutoModelForSequenceClassification.from_pretrained(checkpoint)
+outputs = model(**inputs)
+
+# torch.Size([5, 2])
+print(outputs.logits.shape)
+
+import torch
+predictions = torch.nn.functional.softmax(outputs.logits, dim=-1)
+
+```
 
