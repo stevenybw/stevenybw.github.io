@@ -1032,7 +1032,7 @@ for epoch in range(num_epochs):
         print("Step")
 
 
-#<class 'transformers.models.bert.modeling_bert.BertForSequenceClassification'>
+# <class 'transformers.models.bert.modeling_bert.BertForSequenceClassification'>
 type(model)
 ```
 
