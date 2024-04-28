@@ -24,12 +24,15 @@ categories: paper_reading
 
 还需要参照[Getting Started with Repositories](https://huggingface.co/docs/hub/repositories-getting-started)来访问受限的repo。
 
+可见Hugging Face Datasets包含了音频与视频数据。如何安装Dataset参见[这里](https://huggingface.co/docs/datasets/en/installation)。
+
 ```bash
 mkdir ~/transformers-course
 cd ~/transformers-course
 python3 -m venv .env
 source .env/bin/activate
 pip install transformers[sentencepiece]
+pip install datasets[audio,vision]
 pip install torch
 
 pip install huggingface_hub
@@ -450,7 +453,7 @@ print("\n\n\n".join([f"{x}\n{y}\n{z}" for (x, y, z) in zip(raw_inputs, input_ids
 通过执行上述程序观察到：
 1. Tokenizer API允许一次处理多个句子，并产生一个张量。由于句子的长度不一样，会以最大字符串长度来做**padding**，并且通过**masking**来保证正确性。
 
-#### Model
+#### Model：一个基础模型再加上一个Head
 
 这里的模型指的是**base model**，只会产生**隐藏层**的特征向量，而不是最终的结果。
 通常在实际使用中会根据不同的task给隐藏层再加各种**head**。
@@ -487,6 +490,180 @@ print(outputs.logits.shape)
 
 import torch
 predictions = torch.nn.functional.softmax(outputs.logits, dim=-1)
+```
 
+### Models
+
+```python
+from transformers import BertConfig, BertModel
+
+config = BertConfig()
+
+# 创建一个随机初始化的模型
+model = BertModel(config)
+
+# 载入一个已经训练好的模型（https://huggingface.co/models?other=bert 可以看到所有的Bert模型）
+model = BertModel.from_pretrained("bert-base-cased")
+```
+
+### Tokenizer
+
+#### Word-based
+
+方法：朴素地按空格拆分成单词。
+
+缺点：词汇量非常大，而且`run`、`runs`、`running`都会被作为一个单词，只有靠后续的训练才能捕捉到它们之间的关系。而且类似汉语根本就没有单词边界。
+
+#### Character-based
+
+方法：直接按字符做拆分
+
+优势：词典非常小，而且几乎没有UNK。
+
+缺点
+1. It's less meaningful（取决于语言，**汉语的字符比拉丁语言的字符有意义得多**）
+2. Too much tokens to be processed
+
+#### Subword tokenization
+
+原理：常用词不应该被拆分到更小的Subwords，但是生僻词应该被拆分成更有意义的Subwords。
+
+有各种算法，例如
+1. BPE，用在GPT-2
+2. WordPiece，用在BERT
+3. SentencePiece / Unigram，用在各种多语言模型
+
+### Handling multiple sequences
+
+Transformer模型对于序列长度有限制，大多数模型最多能处理512/1024个token。
+
+[Longformer](https://huggingface.co/docs/transformers/model_doc/longformer)可以处理1000+长度的句子。
+
+[LED](https://huggingface.co/docs/transformers/model_doc/led)类似。
+
+## Chapter 3：Fine-Tuning A Pretrained Model
+
+### Introduction
+
+本章主要介绍
+1. 如何从Hub准备一个大数据集
+2. 如何使用高层Trainer API来微调模型
+3. 如何使用自定义训练循环
+4. 如何采用Accelerate库来分布式化
+
+### 处理数据
+
+快速例子：
+
+```python
+import torch
+from transformers import AdamW, AutoTokenizer, AutoModelForSequenceClassification
+
+# Same as before
+checkpoint = "bert-base-uncased"
+tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+model = AutoModelForSequenceClassification.from_pretrained(checkpoint)
+sequences = [
+    "I've been waiting for a HuggingFace course my whole life.",
+    "This course is amazing!",
+]
+batch = tokenizer(sequences, padding=True, truncation=True, return_tensors="pt")
+
+# 抛异常，因为张量要求长度一致
+batch = tokenizer(sequences, truncation=True, return_tensors="pt")
+
+# 不返回PyTorch张量的话就没问题，此时返回的是Python List
+batch = tokenizer(sequences, truncation=True)
+
+# This is new
+batch["labels"] = torch.tensor([1, 1])
+
+optimizer = AdamW(model.parameters())
+loss = model(**batch).loss
+loss.backward()
+optimizer.step()
+```
+
+接下来，将介绍如何获取Microsoft Research Paraphrase Corpus数据集（包含5801对句子，并且有一个Label表明它们是否是同一个意思）。
+
+该数据集是[GLUE benchmark](https://gluebenchmark.com/)选中的10个数据集之一。
+
+Hugging Face上有专门的分享数据集的地方：https://huggingface.co/datasets
+
+下载数据集
+
+```python
+from datasets import load_dataset
+
+# 载入https://huggingface.co/datasets/nyu-mll/glue数据集里的mrpc
+raw_datasets = load_dataset("glue", "mrpc")
+
+# 包含3668个训练集、408个验证集、1725个测试集
+# 每个集合有4列，分别是句子1、句子2、标签、索引号
+print(raw_datasets)
+
+# 句子1：Amrozi accused his brother , whom he called " the witness " , of deliberately distorting his evidence .
+# 句子2：Referring to him as only " the witness " , Amrozi accused his brother of deliberately distorting his evidence .'
+# label: 1
+# idx: 0
+print(raw_datasets["train"][0])
+
+# 返回数据集的Schema
+# {'sentence1': Value(dtype='string', id=None), 'sentence2': Value(dtype='string', id=None), 'label': ClassLabel(names=['not_equivalent', 'equivalent'], id=None), 'idx': Value(dtype='int32', id=None)}
+print(raw_datasets["train"].features)
+```
+
+预处理数据集。
+
+BERT是带着token_type_id预训练的。
+BERT的目标函数里带了mask，以及next sentence prediction特性。
+下个句子预测指的是，提供一对句子（随机mask tokens），让它预测第二个句子是否跟随第一个句子。
+同时，保证一半正样本一半负样本。
+
+tokenizer背后是用Rust实现的，效率非常高。
+
+```python
+from transformers import AutoTokenizer
+checkpoint = "bert-base-uncased"
+tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+tokenized_sentences_1 = tokenizer(raw_datasets["train"]["sentence1"])
+tokenized_sentences_2 = tokenizer(raw_datasets["train"]["sentence2"])
+
+# tokenizer通过拼接的方式来处理一对句子，同时还会增加token_type_ids区分它是第一句话还是第二句话
+inputs = tokenizer("This is the first sentence.", "This is the second one.")
+tokenizer(raw_datasets["train"][15]["sentence1"], raw_datasets["train"][15]["sentence2"])
+
+# 它的token_type_ids是全0向量
+tokenizer(raw_datasets["train"][15]["sentence1"])
+
+# tokernizer允许将token id映射回单词
+tokenizer.convert_ids_to_tokens(inputs["input_ids"])
+
+# [CLS] sentence1 [SEP]的token_type_id为0、sentence2 [SEP]的token_type_id为1
+print("\n".join([f"{t} {i}" for t, i in zip(tokenizer.convert_ids_to_tokens(inputs["input_ids"]), inputs["token_type_ids"])]))
+
+# 该朴素方法将整个数据集载入内存并做分词
+tokenized_dataset = tokenizer(
+    raw_datasets["train"]["sentence1"],
+    raw_datasets["train"]["sentence2"],
+    padding=True,
+    truncation=True,
+)
+
+def tokenize_function(example):
+    print(type(example))
+    # 注意到这里没有padding，也没有返回PyTorch张量，所以返回的是Python List，不知有没有性能问题
+    return tokenizer(example["sentence1"], example["sentence2"], truncation=True)
+
+# Hugging Face Dataset的数据集是存在磁盘上的Apache Arrow数据
+# 通过这种方法可以流式做Tokenization，省内存
+# 若batched=True，则传入udf的样本是一批数据而不是一个数据，在这里是datasets.formatting.formatting.LazyBatch
+# tokenizer背后是用Rust实现的，效率非常高
+# 同时还会自动施加多进程并行
+tokenized_datasets = raw_datasets.map(tokenize_function, batched=True, num_proc=16)
+
+# 可见行数没有变，但是新增了三个列，分别是input_ids、token_type_ids、attention_mask
+print(raw_datasets)
+print(tokenized_datasets)
 ```
 
