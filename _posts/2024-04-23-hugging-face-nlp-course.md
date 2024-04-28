@@ -26,6 +26,76 @@ categories: paper_reading
 
 可见Hugging Face Datasets包含了音频与视频数据。如何安装Dataset参见[这里](https://huggingface.co/docs/datasets/en/installation)。
 
+[Hugging Face Accelerate库](https://huggingface.co/docs/accelerate/en/index)可以让你只需写一份PyTorch代码，并且能运行在各种不同的分布式配置下，只需要你做一些微小的变动。建立在`torch_xla`和`torch.distributed`，Hugging Face Accelerate库帮你做其他各种复杂的工作，并自动使用`DeepSpeed`、`fully shareded data parallelism`、自动混合精度等。
+
+在执行`accelerate config`的时候它会问你一些问题。
+
+支持的配置：
+1. 单机
+2. 多CPU
+3. 多XPU
+4. 多GPU
+5. 多NPU
+6. 多MLU
+7. TPU
+
+面向CPU集群英特尔有`Intel PyTorch Extension (IPEX)`来加速训练过程。
+
+同时还可以使用TorchDynamo来加速PyTorch程序。
+
+Torch Dynamo有各种后端：
+1. eager
+2. aot_eager
+3. inductor【默认】
+4. aot_ts_nvfuser
+5. nvprims_nvfuser
+6. cudagraphs
+7. ofi
+8. fx2trt
+9. onnxrt
+10. tensorrt
+11. ipex
+12. tvm
+
+可以为`torch.compile`配置默认行为（参见[torch.compile](https://pytorch.org/docs/stable/generated/torch.compile.html)）。
+1. `mode`参数。`default`平衡性能与开销。`reduce-overhead`。`max-autotune`。
+2. `fullgraph`参数。默认False，能容忍`graph breaks`，尽可能地把函数里的子图进行优化。如果是True，那么我们需要整个函数可以放在一个计算图里，若无法实现则抛异常。
+3. `dynamic`参数。默认是None，会自动检测。若是False，永远不会生成dynamic kernel，永远都会做specialization。如果是True，会预先编译一个尽量动态的kernel避免specialization带来的编译时间。
+
+是否使用DeepSpeed？No
+
+是否使用混合精度？[第四代志强处理器支持INT8和BF16两个数据类型](https://www.intel.com/content/www/us/en/content-details/785250/accelerate-artificial-intelligence-ai-workloads-with-intel-advanced-matrix-extensions-intel-amx.html)
+
+最终在`/root/.cache/huggingface/accelerate/default_config.yaml`产生一个配置文件：
+
+```
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: 'NO'
+downcast_bf16: 'no'
+dynamo_config:
+  dynamo_backend: INDUCTOR
+  dynamo_mode: default
+  dynamo_use_dynamic: false
+  dynamo_use_fullgraph: false
+enable_cpu_affinity: false
+ipex_config:
+  ipex: true
+machine_rank: 0
+main_training_function: main
+mixed_precision: bf16
+num_machines: 1
+num_processes: 1
+rdzv_backend: static
+same_network: true
+tpu_env: []
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: true
+```
+
+[Hugging Face Evaluate库](https://github.com/huggingface/evaluate/)提供了一套易用的、标准化的模型评价、比较方案，实现了各种Metric，允许比较各种模型。
+
 ```bash
 mkdir ~/transformers-course
 cd ~/transformers-course
@@ -34,6 +104,10 @@ source .env/bin/activate
 pip install transformers[sentencepiece]
 pip install datasets[audio,vision]
 pip install torch
+pip install evaluate
+
+pip install accelerate
+accelerate config
 
 pip install huggingface_hub
 huggingface-cli login
@@ -370,6 +444,17 @@ Transformer模型最大的特点是用了一个特殊的**Attention层**，该�
 
 # 背景知识
 
+## torch dynamo
+
+Torch Dynamo 是一个优化框架，属于 PyTorch 生态系统的一部分。它的目标是自动优化 PyTorch 程序，提高执行效率。Torch Dynamo 通过动态地分析和转换 PyTorch 的代码，可以将其运行时的效率提升至更接近手工优化的水平。
+
+Dynamo 通过一个名为 "FX Graph Mode" 的中间表示（IR）来工作，这允许它在运行时捕获和转换 PyTorch 的操作。这种方式使得 Dynamo 能够优化那些通常难以预测或者动态变化的代码，如控制流和循环结构等。通过这种方式，Torch Dynamo 旨在提供一种自动化的优化方法，用户无需进行复杂的代码重写就能提升性能。
+
+参见[TorchDynami](https://pytorch.org/docs/stable/torch.compiler_deepdive.html)。TorchDynamo是一个Python级别的JIT编译器，不用进行任何修改，就可以让PyTorch程序变快。
+它将Python BC重写并提取PyTorch操作，变换成一个FX Graph。
+
+[TorchInductor](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747)是一个PyTorch-native编译器。
+
 ## Layer Normalization
 
 参见[这里](https://zhuanlan.zhihu.com/p/54530247)。Batch Normalization是将这个批次里的所有样本的同一个通道的特征做归一化。Layer Normalization是将同一个样本的不同通道做归一化。
@@ -665,5 +750,132 @@ tokenized_datasets = raw_datasets.map(tokenize_function, batched=True, num_proc=
 # 可见行数没有变，但是新增了三个列，分别是input_ids、token_type_ids、attention_mask
 print(raw_datasets)
 print(tokenized_datasets)
+
+from transformers import DataCollatorWithPadding
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+samples = tokenized_datasets["train"][:8]
+samples = {k: v for k, v in samples.items() if k not in ["idx", "sentence1", "sentence2"]}
+
+# 可见每个样本的长度都不一样，而且类型全是list
+# [50, 59, 47, 67, 59, 50, 62, 32]
+[len(x) for x in samples["input_ids"]]
+[type(x) for x in samples["input_ids"]]
+
+# 可见data_collator将一批样本整理成了能喂给PyTorch的形式，该padding的做padding，该做转换的做转换
+# {'input_ids': torch.Size([8, 67]), 'token_type_ids': torch.Size([8, 67]), 'attention_mask': torch.Size([8, 67]), 'labels': torch.Size([8])}
+batch = data_collator(samples)
+{k: v.shape for k, v in batch.items()}
 ```
 
+### 使用Trainer API或者Keras来微调模型
+
+```python
+from datasets import load_dataset
+from transformers import AutoTokenizer, DataCollatorWithPadding
+
+raw_datasets = load_dataset("glue", "mrpc")
+checkpoint = "bert-base-uncased"
+tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+
+def tokenize_function(example):
+    return tokenizer(example["sentence1"], example["sentence2"], truncation=True)
+
+tokenized_datasets = raw_datasets.map(tokenize_function, batched=True)
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+
+from transformers import TrainingArguments
+
+training_args = TrainingArguments("test-trainer")
+
+from transformers import AutoModelForSequenceClassification
+
+# 提示以下信息，表明用来做序列分类的head没有提供参数，需要进一步训练这个模型来做下游任务
+# Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
+# You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=2)
+
+from transformers import Trainer
+
+trainer = Trainer(
+    model,
+    training_args,
+    train_dataset=tokenized_datasets["train"],
+    eval_dataset=tokenized_datasets["validation"],
+    data_collator=data_collator,
+    tokenizer=tokenizer,
+)
+
+## 可见一个进度条在滚动，预计总时间是18分钟（这是4个CPU核心，r7i.2xlarge）。而tutorial上说，在GPU上只需要两三分钟。
+##  注意：07:17<01:02。前者表示已用时间。后者表示剩余时间。后者不是表示总时间。
+## 换成r7i.8xlarge之后，预计总时间是7分钟，扩展性没有那么好，吞吐量从1.23 it/s增加到2.85 it/s，只翻了2倍。
+## 每500步会报告一次training loss，不过不会告诉你这个模型表现得好不好。因为没有设置evaluation_strategy，它可以是steps或epoch。
+##   {'loss': 0.4811, 'grad_norm': 19.382593154907227, 'learning_rate': 3.184458968772695e-05, 'epoch': 1.09}
+##   {'loss': 0.2325, 'grad_norm': 0.03515595570206642, 'learning_rate': 1.3689179375453886e-05, 'epoch': 2.18}
+##   TrainOutput(global_step=1377, training_loss=0.287335001738416, metrics={'train_runtime': 499.6016, 'train_samples_per_second': 22.026, 'train_steps_per_second': 2.756, 'total_flos': 405114969714960.0, 'train_loss': 0.287335001738416, 'epoch': 3.0})
+##   可见FLOPS为810 GFlops
+trainer.train()
+
+predictions = trainer.predict(tokenized_datasets["validation"])
+
+# (408, 2) (408,)
+print(predictions.predictions.shape, predictions.label_ids.shape)
+
+import numpy as np
+preds = np.argmax(predictions.predictions, axis=-1)
+
+import evaluate
+
+# 可以拿到MRPC任务伴随的评估测度
+metric = evaluate.load("glue", "mrpc")
+
+# 根据实际的预测与Ground Truth比较，得到验证集上85.54%的精度以及F1 score分数89.88。
+# {'accuracy': 0.8553921568627451, 'f1': 0.8987993138936535}
+metric.compute(predictions=preds, references=predictions.label_ids)
+
+def compute_metrics(eval_preds):
+    metric = evaluate.load("glue", "mrpc")
+    logits, labels = eval_preds
+    predictions = np.argmax(logits, axis=-1)
+    return metric.compute(predictions=predictions, references=labels)
+
+training_args = TrainingArguments("test-trainer", evaluation_strategy="epoch")
+model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=2)
+
+# 带入compute_metrics并指定epoch的evaluation_strategy，每个epoch会汇报测度
+trainer = Trainer(
+    model,
+    training_args,
+    train_dataset=tokenized_datasets["train"],
+    eval_dataset=tokenized_datasets["validation"],
+    data_collator=data_collator,
+    tokenizer=tokenizer,
+    compute_metrics=compute_metrics,
+)
+
+# {'eval_loss': 0.3872298002243042, 'eval_accuracy': 0.8357843137254902, 'eval_f1': 0.8850771869639794, 'eval_runtime': 4.52, 'eval_samples_per_second': 90.265, 'eval_steps_per_second': 11.283, 'epoch': 1.0}
+# {'loss': 0.5399, 'grad_norm': 17.776399612426758, 'learning_rate': 3.184458968772695e-05, 'epoch': 1.09}
+# {'eval_loss': 0.4077554941177368, 'eval_accuracy': 0.8578431372549019, 'eval_f1': 0.897887323943662, 'eval_runtime': 4.5333, 'eval_samples_per_second': 90.001, 'eval_steps_per_second': 11.25, 'epoch': 2.0}
+# {'loss': 0.3295, 'grad_norm': 0.09225674718618393, 'learning_rate': 1.3689179375453886e-05, 'epoch': 2.18}
+# {'eval_loss': 0.7114211916923523, 'eval_accuracy': 0.8455882352941176, 'eval_f1': 0.8941176470588236, 'eval_runtime': 4.5421, 'eval_samples_per_second': 89.827, 'eval_steps_per_second': 11.228, 'epoch': 3.0}
+# {'train_runtime': 526.6296, 'train_samples_per_second': 20.895, 'train_steps_per_second': 2.615, 'train_loss': 0.3660710043204203, 'epoch': 3.0}
+# TrainOutput(global_step=1377, training_loss=0.3660710043204203, metrics={'train_runtime': 526.6296, 'train_samples_per_second': 20.895, 'train_steps_per_second': 2.615, 'total_flos': 405114969714960.0, 'train_loss': 0.3660710043204203, 'epoch': 3.0})
+trainer.train()
+```
+
+### 不使用Trainer类，看看训练过程中发生了什么
+
+```python
+from datasets import load_dataset
+from transformers import AutoTokenizer, DataCollatorWithPadding
+
+raw_datasets = load_dataset("glue", "mrpc")
+checkpoint = "bert-base-uncased"
+tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+
+def tokenize_function(example):
+    return tokenizer(example["sentence1"], example["sentence2"], truncation=True)
+
+tokenized_datasets = raw_datasets.map(tokenize_function, batched=True)
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+
+```
