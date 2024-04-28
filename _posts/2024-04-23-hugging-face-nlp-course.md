@@ -455,6 +455,16 @@ Dynamo 通过一个名为 "FX Graph Mode" 的中间表示（IR）来工作，这
 
 [TorchInductor](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747)是一个PyTorch-native编译器。
 
+## KV Cache
+
+对于Decoder-only的生成式模型，例如GPT-2，关于KV Cache的动机[这篇文章里有一个动图非常形象地展示了问题所在以及KVCache缓存了哪些东东](https://medium.com/@joaolages/kv-caching-explained-276520203249)：每次预测了下一个token之后，还要把这个token插入回input并进行下一次预测，这叫**自回归特性**。
+
+根据[这里](https://www.zhihu.com/question/596900067)，KV Cache是通过空间换时间的思想，提高推理性能。生成式模型每次推理只会输出一个token，然后与输入tokens拼接在一起，作为下次推理的输入，直到遇到一个终止符。因为模型就是一个函数，输入token序列，输出下一个token的概率分布。如果说模型内部没有缓存机制，那么就需要大量的重算。
+
+结论：KVCache就是缓存序列的每个token在每个Transformer的的Key和Value。这个技术难就难在它需要侵入模型推理的API，给API引入一个缓存。
+
+推荐阅读https://jalammar.github.io/illustrated-gpt2/
+
 ## Layer Normalization
 
 参见[这里](https://zhuanlan.zhihu.com/p/54530247)。Batch Normalization是将这个批次里的所有样本的同一个通道的特征做归一化。Layer Normalization是将同一个样本的不同通道做归一化。
@@ -864,6 +874,10 @@ trainer.train()
 
 ### 不使用Trainer类，看看训练过程中发生了什么
 
+涉及到的内部实现：
+1. 需要对tokenized_datasets进行一些后处理
+2. DataLoader用于加载数据
+
 ```python
 from datasets import load_dataset
 from transformers import AutoTokenizer, DataCollatorWithPadding
@@ -878,4 +892,149 @@ def tokenize_function(example):
 tokenized_datasets = raw_datasets.map(tokenize_function, batched=True)
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
+# 删掉与训练无关的列
+tokenized_datasets = tokenized_datasets.remove_columns(["sentence1", "sentence2", "idx"])
+
+# 模型要求标签列名字是labels
+tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
+
+# 将数据集的格式转换为PyTorch张量
+tokenized_datasets.set_format("torch")
+
+# ['labels', 'input_ids', 'token_type_ids', 'attention_mask']
+tokenized_datasets["train"].column_names
+
+from torch.utils.data import DataLoader
+
+train_dataloader = DataLoader(
+    tokenized_datasets["train"], shuffle=True, batch_size=8, collate_fn=data_collator
+)
+
+eval_dataloader = DataLoader(
+    tokenized_datasets["validation"], batch_size=8, collate_fn=data_collator
+)
+
+for batch in train_dataloader:
+    break
+
+
+# 检验数据正确性，可见一批数据有8个样本，最大长度是69
+# {'labels': torch.Size([8]), 'input_ids': torch.Size([8, 69]), 'token_type_ids': torch.Size([8, 69]), 'attention_mask': torch.Size([8, 69])}
+{k: v.shape for k, v in batch.items()}
+
+from transformers import AutoModelForSequenceClassification
+
+model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=2)
+
+# 验证训练过程是不是能如预期进行
+outputs = model(**batch)
+
+# tensor(1.1463, grad_fn=<NllLossBackward0>) torch.Size([8, 2])
+print(outputs.loss, outputs.logits.shape)
+
+# Trainer默认使用AdamW优化器，和Adam一样，但是使用了不一样的权重衰减正则化方法。
+from transformers import AdamW
+
+# FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
+optimizer = AdamW(model.parameters(), lr=5e-5)
+
+from transformers import get_scheduler
+num_epochs = 3
+
+# len(train_dataloader)指的是有多少批数据会过来
+num_training_steps = num_epochs * len(train_dataloader)
+lr_scheduler = get_scheduler(
+    "linear",
+    optimizer=optimizer,
+    num_warmup_steps=0,
+    num_training_steps=num_training_steps,
+)
+print(num_training_steps)
+
+import torch
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+model.to(device)
+device
+
+from tqdm.auto import tqdm
+progress_bar = tqdm(range(num_training_steps))
+
+model.train()
+for epoch in range(num_epochs):
+    for batch in train_dataloader:
+        # 将数据移到相应设备上
+        batch = {k: v.to(device) for k, v in batch.items()}
+
+        # 做推理
+        outputs = model(**batch)
+        loss = outputs.loss
+        loss.backward()
+
+        optimizer.step()
+        lr_scheduler.step()
+        optimizer.zero_grad()
+        progress_bar.update(1)
+
+
+import evaluate
+
+metric = evaluate.load("glue", "mrpc")
+model.eval()
+for batch in eval_dataloader:
+    batch = {k: v.to(device) for k, v in batch.items()}
+    with torch.no_grad():
+        outputs = model(**batch)
+    logits = outputs.logits
+    predictions = torch.argmax(logits, dim=-1)
+    metric.add_batch(predictions=predictions, references=batch["labels"])
+
+
+metric.compute()
 ```
+
+若使用Accelerator：
+
+```python
+from accelerate import Accelerator
+from transformers import AdamW, AutoModelForSequenceClassification, get_scheduler
+
+# 将会读取配置并初始化分布式训练环境
+accelerator = Accelerator()
+
+model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=2)
+optimizer = AdamW(model.parameters(), lr=3e-5)
+
+train_dataloader, eval_dataloader, model, optimizer = accelerator.prepare(
+    train_dataloader, eval_dataloader, model, optimizer
+)
+
+num_epochs = 3
+num_training_steps = num_epochs * len(train_dataloader)
+lr_scheduler = get_scheduler(
+    "linear",
+    optimizer=optimizer,
+    num_warmup_steps=0,
+    num_training_steps=num_training_steps,
+)
+
+progress_bar = tqdm(range(num_training_steps))
+
+model.train()
+for epoch in range(num_epochs):
+    for batch in train_dataloader:
+        outputs = model(**batch)
+        loss = outputs.loss
+        accelerator.backward(loss)
+        optimizer.step()
+        lr_scheduler.step()
+        optimizer.zero_grad()
+        progress_bar.update(1)
+        print("Step")
+
+
+#<class 'transformers.models.bert.modeling_bert.BertForSequenceClassification'>
+type(model)
+```
+
+同时还可以把脚本放在外面，并且调用`accelerate launch train.py`，可以用来做分布式训练。
+

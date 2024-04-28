@@ -52,9 +52,49 @@ WHERE support_response <> NULL
 LLM是自回归Transformer模型，基于一个prompt以及已经生成的token预测下一个token。
 token是一组字符的表示，常用[Byte-Paired Encoding](https://huggingface.co/learn/nlp-course/en/chapter6/5)，平均4个英语字符。
 
+推理过程有两个阶段：
+1. prefill：模型一次性处理所有输入prompt
+2. decoding：开始生成token
+
+因为文本生成过程本身是串行的，为了增广并行度，通常会**攒成一批**。
+**对于Online负载，通常也能搞一个32的批**。
+
+批越大内存需求越大。
+
+KV Cache会需要较高的内存。
+对于13B的模型，每个token大概需要800KB内存。
+平均请求token数为2000，需要1.6GB的内存。
+
+为了节省内存，近期工作提出跨越请求地共享token。
+考虑到大量用户请求采用了同一个prompt模板，前缀都一样，跨越请求共享token是成立的。
+但是当前工作仅关注Online负载，复用空间有限。
+SQL场景下有广阔的复用空间。
+
+### 分析场景的优化机会
+
+**提升KV Cache命中率**：离线场景下有全部数据，不局限于在线场景只能关注当下。
+
+**避免重复计算**：精确删冗。
+
+**基于代价模型的优化**：为LLM操作建立性能模型，整合进CBO优化器。
+
+## 请求构造
+
+### 列重排
+
+案例：LLM("Give an overview based on this: ", *)
+
+算法：利用列值的Cardinality。
+1. 为每一列预计算平均字符串长度、Cardinality
+2. 根据以下公式计算分数：平均字符串长度 * 总行数 / Cardinality
+3. 按分数降序排序
+
+### 行重排
+
 # 背景知识
 
 ## BPE
 
 参见：https://huggingface.co/learn/nlp-course/en/chapter6/5
 
+算法过程：
