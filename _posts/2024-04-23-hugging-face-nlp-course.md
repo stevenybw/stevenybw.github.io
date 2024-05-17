@@ -1038,3 +1038,23 @@ type(model)
 
 同时还可以把脚本放在外面，并且调用`accelerate launch train.py`，可以用来做分布式训练。
 
+
+## Chapter 6: The Tokernizers Library
+
+本章讨论
+1. 如何基于一个检查点、面向一个新的数据集去训练一个tokenizer？
+2. 快速Tokenizer的特性
+3. NLP领域中不同的三个Subword分词算法
+
+### 基于一个老分词器训练一个新分词器
+
+注意：训练分词器是确定性的，也就是说，同一个算法+同一个语料总是会产生同一个分词器。
+
+```python
+from datasets import load_dataset
+
+# This can take a few minutes to load, so grab a coffee or tea while you wait!
+raw_datasets = load_dataset("code_search_net", "python")
+
+
+```
