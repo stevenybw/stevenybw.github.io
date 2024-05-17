@@ -13,7 +13,7 @@ FineWeb包含超过15TB token的清洗并删冗后的英语Web数据集。
 总共有99个Archive Crawl，每个Archive Crawl有100个Segment，因此共计有9900个Segment。
 对于WARC，每个Segment大约有800个文件，每个文件用gz算法压缩，大约每个压缩后有1.2GB。
 
-因此整个Common Crawl有8910000个文件，按照每个文件经过fineweb清洗后的大小为18MB，总大小为160MB，离15T还差很多。
+因此整个Common Crawl有8910000个文件，按照每个文件经过fineweb清洗后的大小为18MB，总大小为160TB，和15T Token差不多能对上了。
 
 ```bash
 for s in $(aws s3 ls s3://commoncrawl/crawl-data/ | grep CC-MAIN- | tr -s ' ' | cut -d ' ' -f 3 | sed 's#/##g'); do
