@@ -172,6 +172,155 @@ Total Runtime: 19 minutes and 27 seconds
         Exit status: 1
 ```
 
+# 性能分析
+
+给`WarcReader`加一个`limit=1000`即可在26秒内出结果。
+
+```bash
+python -m cProfile -o process_common_crawl_dump.cProfile -s cumtime process_common_crawl_dump.py CC-MAIN-2023-23
+python -m pstats process_common_crawl_dump.cProfile
+```
+
+看上去cPython对多线程的支持有限，[extractor使用了ThreadPoolExecutor来做基于多线程的线程池](https://github.com/huggingface/datatrove/blob/main/src/datatrove/pipeline/extractors/base.py#L48)。
+
+尝试`yaapi`，可以自底向上看到具体哪些调用是热点。不过它存在的一个问题是，在使用yappi对Cython模块进行分析时，Cython函数的调用统计通常会归入调用它们的Python函数。
+
+```bash
+pip install yappi
+python -m yappi -c cpu -o process_common_crawl_dump.yappi -f pstat process_common_crawl_dump.py CC-MAIN-2023-23
+python -m pstats process_common_crawl_dump.yappi
+# sort tottime
+# stats 100
+
+# 若没有-b，则不会将builtin函数考虑进去，所以打开-b进一步看看哪些builtin是最需要优化的
+python -m yappi -c cpu -b -o process_common_crawl_dump.yappi.withBuiltins -f pstat process_common_crawl_dump.py CC-MAIN-2023-23
+python -m pstats process_common_crawl_dump.yappi.withBuiltins
+# sort tottime
+# stats 100
+```
+
+使用`py-spy`画火焰图，可以自顶向下做性能分析。[py-spy默认是CPU模式，在加上--idle命令之后是Wall模式](https://github.com/benfred/py-spy/issues/458)，我们先看看CPU模式：
+
+
+```bash
+pip install py-spy
+py-spy record -o process_common_crawl_dump.pyspy.svg -f flamegraph --rate 100 -- python process_common_crawl_dump.py CC-MAIN-2023-23
+```
+
+尝试`line_profiler`：
+
+```bash
+pip install line_profiler
+vi pyvenv-fineweb/lib/python3.10/site-packages/trafilatura/htmlprocessing.py
+# 在def prune_unwanted_nodes之前增加 @line_profiler.profile
+LINE_PROFILE=1 python process_common_crawl_dump.py CC-MAIN-2023-23
+python -m line_profiler -rtmz profile_output.lprof
+```
+
+输出结果：
+```
+ 11.13 seconds - /root/pyvenv-fineweb/lib/python3.10/site-packages/trafilatura/htmlprocessing.py:90 - prune_unwanted_nodes
+Wrote profile results to profile_output.txt
+Wrote profile results to profile_output_2024-05-19T081609.txt
+Wrote profile results to profile_output.lprof
+To view details run:
+python -m line_profiler -rtmz profile_output.lprof
+```
+
+进一步查看
+```
+Timer unit: 1e-06 s
+
+Total time: 11.1257 s
+File: /root/pyvenv-fineweb/lib/python3.10/site-packages/trafilatura/htmlprocessing.py
+Function: prune_unwanted_nodes at line 90
+
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+    90                                           @line_profiler.profile
+    91                                           def prune_unwanted_nodes(tree, nodelist, with_backup=False):
+    92                                               '''Prune the HTML tree by removing unwanted sections.'''
+    93     11665       3130.6      0.3      0.0      if with_backup:
+    94      1577      25789.5     16.4      0.2          old_len = len(tree.text_content())  # ' '.join(tree.itertext())
+    95      1577      77741.7     49.3      0.7          backup = deepcopy(tree)
+    96                                           
+    97     27462       6424.3      0.2      0.1      for expression in nodelist:
+    98     54290   10884183.9    200.5     97.8          for subtree in expression(tree):
+    99                                                       # preserve tail text from deletion
+   100     38493       8026.8      0.2      0.1              if subtree.tail is not None:
+   101     28309      10939.3      0.4      0.1                  prev = subtree.getprevious()
+   102     28309       3699.4      0.1      0.0                  if prev is None:
+   103     17852       6883.3      0.4      0.1                      prev = subtree.getparent()
+   104     28309       3616.2      0.1      0.0                  if prev is not None:
+   105                                                               # There is a previous node, append text to its tail
+   106     28309      23310.3      0.8      0.2                      prev.tail = " ".join([prev.tail, subtree.tail]) if prev.tail else subtree.tail
+   107                                                       # remove the node
+   108     38493      52627.2      1.4      0.5              subtree.getparent().remove(subtree)
+   109                                           
+   110     11665       1707.4      0.1      0.0      if not with_backup:
+   111     10088       1384.7      0.1      0.0          return tree
+   112                                           
+   113      1577      14788.8      9.4      0.1      new_len = len(tree.text_content())
+   114                                               # todo: adjust for recall and precision settings
+   115      1577       1195.3      0.8      0.0      if new_len > old_len/7:
+   116      1444        198.0      0.1      0.0          return tree
+   117       133         17.6      0.1      0.0      return backup
+
+ 11.13 seconds - /root/pyvenv-fineweb/lib/python3.10/site-packages/trafilatura/htmlprocessing.py:90 - prune_unwanted_nodes
+ ```
+
+ 推测是`expression(tree)`调用时间最长，把它从for循环里拆开来后进一步分析，果然`XPath`求值是最慢的，占了97.1%的时间。
+
+ ```
+ Timer unit: 1e-06 s
+
+Total time: 11.1063 s
+File: /root/pyvenv-fineweb/lib/python3.10/site-packages/trafilatura/htmlprocessing.py
+Function: prune_unwanted_nodes at line 90
+
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+    90                                           @line_profiler.profile
+    91                                           def prune_unwanted_nodes(tree, nodelist, with_backup=False):
+    92                                               '''Prune the HTML tree by removing unwanted sections.'''
+    93     11665       3206.3      0.3      0.0      if with_backup:
+    94      1577      25812.4     16.4      0.2          old_len = len(tree.text_content())  # ' '.join(tree.itertext())
+    95      1577      78249.5     49.6      0.7          backup = deepcopy(tree)
+    96                                           
+    97     27462       6485.1      0.2      0.1      for expression in nodelist:
+    98     15797   10848708.6    686.8     97.7          subtrees = expression(tree)
+    99     54290      13832.9      0.3      0.1          for subtree in subtrees:
+   100                                                       # preserve tail text from deletion
+   101     38493       7947.7      0.2      0.1              if subtree.tail is not None:
+   102     28309      11156.7      0.4      0.1                  prev = subtree.getprevious()
+   103     28309       3635.4      0.1      0.0                  if prev is None:
+   104     17852       7424.6      0.4      0.1                      prev = subtree.getparent()
+   105     28309       3392.5      0.1      0.0                  if prev is not None:
+   106                                                               # There is a previous node, append text to its tail
+   107     28309      23303.6      0.8      0.2                      prev.tail = " ".join([prev.tail, subtree.tail]) if prev.tail else subtree.tail
+   108                                                       # remove the node
+   109     38493      52844.9      1.4      0.5              subtree.getparent().remove(subtree)
+   110                                           
+   111     11665       1721.9      0.1      0.0      if not with_backup:
+   112     10088       1288.3      0.1      0.0          return tree
+   113                                           
+   114      1577      15838.1     10.0      0.1      new_len = len(tree.text_content())
+   115                                               # todo: adjust for recall and precision settings
+   116      1577       1234.6      0.8      0.0      if new_len > old_len/7:
+   117      1444        200.1      0.1      0.0          return tree
+   118       133         17.2      0.1      0.0      return backup
+
+ 11.11 seconds - /root/pyvenv-fineweb/lib/python3.10/site-packages/trafilatura/htmlprocessing.py:90 - prune_unwanted_nodes
+ ```
+
+## 分析结果
+
+通过`yappi`的结果发现`prune_unwanted_nodes`在Python解释器的部分占用了不少时间，
+但是由于再往下是用Cython实现的，没法再进一步分解了。
+尝试用line_profiler进行分析。
+
+总得来说，可以用`yappi`/`py-spy`定位到热点Python函数，如果能找到热点函数，可以再用`line_profiler`进一步细化热点情况。
+
 # 相关开源数据集
 
 1. [RefinedWeb](https://huggingface.co/papers/2306.01116)：未开源
