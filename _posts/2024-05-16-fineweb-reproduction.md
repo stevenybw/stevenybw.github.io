@@ -197,6 +197,12 @@ python -m yappi -c cpu -b -o process_common_crawl_dump.yappi.withBuiltins -f pst
 python -m pstats process_common_crawl_dump.yappi.withBuiltins
 # sort tottime
 # stats 100
+
+# 做全量数据分析
+rm -rf logging; python -m yappi -c cpu -b -o process_common_crawl_dump-FULL.yappi -f pstat process_common_crawl_dump.py CC-MAIN-2023-23; rm -rf logging; py-spy record -o process_common_crawl_dump-FULL.pyspy.svg -f flamegraph --rate 100 -- python process_common_crawl_dump.py CC-MAIN-2023-23
+python -m pstats process_common_crawl_dump-FULL.yappi
+# sort tottime
+# stats 100
 ```
 
 使用`py-spy`画火焰图，可以自顶向下做性能分析。[py-spy默认是CPU模式，在加上--idle命令之后是Wall模式](https://github.com/benfred/py-spy/issues/458)，我们先看看CPU模式：
@@ -320,6 +326,42 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
 尝试用line_profiler进行分析。
 
 总得来说，可以用`yappi`/`py-spy`定位到热点Python函数，如果能找到热点函数，可以再用`line_profiler`进一步细化热点情况。
+
+# lxml从源码构建
+
+```bash
+git clone https://github.com/lxml/lxml
+cd lxml
+git checkout lxml-5.2.2
+sudo apt install libxslt-dev libxml2-dev
+pip install -r requirements.txt
+
+# 就地构建Cython相关的依赖
+python setup.py build_ext -i --with-cython
+
+# 执行单元测试，1946个测试全部通过
+python test.py
+
+python ./benchmark/bench_xpath.py
+```
+
+共计有4个Cython文件，分别是`src/lxml/etree.pyx`、`src/lxml/objectify.pyx`、`src/lxml/builder.py`、`src/lxml/_elementpath.py`、`src/lxml/html/diff.py`、`src/lxml/sax.py`。
+对应的C文件分别在`src/lxml/etree.c`、`src/lxml/objectify.c`、`src/lxml/builder.c`、`src/lxml/_elementpath.c`、`src/lxml/html/diff.c`、`src/lxml/sax.c`。
+
+`XPath`类的定义位于xpath.pxi:377，它首先会调用`xmlXPathCtxtCompile`将XPath查询编译，进而调用`xmlXPathCompiledEval`（声明自xpath.pyd:85，实现在libxml2，可见xpath.pxd的作用是libxml2的Cython-binding）去搜索XML树。
+
+# libxml2从源代码构建
+
+```bash
+sudo apt install autogen bear
+git clone https://github.com/GNOME/libxml2
+# 查询到版本为2.9.13+dfsg-1ubuntu0.4
+dpkg -l | grep libxml2
+git checkout v2.9.13
+CFLAGS='-O2 -fno-semantic-interposition' ./autogen.sh
+bear make
+# TODO
+```
 
 # 相关开源数据集
 
