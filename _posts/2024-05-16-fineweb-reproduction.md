@@ -6,6 +6,13 @@ FineWeb包含超过15TB token的清洗并删冗后的英语Web数据集。
 这个数据集接入了`datatrove`库，
 他们开发的大规模数据处理库。
 
+## 与LLaMA 3的关系
+
+参见[Introducing Meta Llama 3: The most capable openly available LLM to date
+](https://ai.meta.com/blog/meta-llama-3/)，其中提到它们从各种公开数据源收集数据，通过一系列过滤管线（启发式过滤器、NSFW过滤器、语义删冗、文本质量分类器）将数据清洗。特别提到，**用于训练文本质量分类器的训练数据由Llama 2模型生成）**。
+
+ASIDE：在Instruction Fine-tuning阶段，通过SFT（Supervised Fine-tuning）、拒绝采样（Rejection Sampling）、PPO（Proximal Policy Optimization）、DPO（Direct Preference Optimization）等技术来做后训练处理。
+
 # 复现
 
 ## 分析Common Crawl
@@ -113,24 +120,39 @@ python -c "import nltk; nltk.download('punkt')"
 
 ```
 --- 🛠️ PIPRLINEW🛠                                                                                                  [66/1812]
-📖 - READER: 🕷 Warc                                                                                                         🔻 - FILTER: 😈 Url-filter                                                                                                  🛢 - EXTRAC: ⛏ Trafilatura
+📖 - READER: 🕷 Warc                                                                                                         
+🔻 - FILTER: 😈 Url-filter                                                                                                  
+🛢 - EXTRAC: ⛏ Trafilatura
 🔻 - FILTER: 🌍 Language ID
-🔻 - FILTER: 👯 Gopher Repetition                                                                                           🔻 - FILTER: 🥇 Gopher Quality                                                                                              🔻 - FILTER: ⛰ C4 Quality                                                                                                   🔻 - FILTER: 🍷 FineWeb Quality
+🔻 - FILTER: 👯 Gopher Repetition                                                                                           
+🔻 - FILTER: 🥇 Gopher Quality                                                                                              
+🔻 - FILTER: ⛰ C4 Quality                                                                                                   
+🔻 - FILTER: 🍷 FineWeb Quality
 💽 - WRITER: 🐿 Jsonl
-2024-05-17 07:13:38.553 | INFO     | datatrove.pipeline.readers.base:read_files_shard:193 - Reading input file 1685224653183.5/warc/CC-MAIN-20230606214755-20230607004755-00000.warc.gz                                                                 2024-05-17 07:13:43.012 | WARNING  | datatrove.pipeline.readers.base:get_document_from_dict:93 - Found document without text, skipping. Is your `text_key` ("text") correct?                                                                            2024-05-17 07:33:20.415 | SUCCESS  | datatrove.executor.base:_run_for_rank:85 - Processing done for rank=0
+2024-05-17 07:13:38.553 | INFO     | datatrove.pipeline.readers.base:read_files_shard:193 - Reading input file 1685224653183.5/warc/CC-MAIN-20230606214755-20230607004755-00000.warc.gz                                                                 
+2024-05-17 07:13:43.012 | WARNING  | datatrove.pipeline.readers.base:get_document_from_dict:93 - Found document without text, skipping. Is your `text_key` ("text") correct?                                                                            
+2024-05-17 07:33:20.415 | SUCCESS  | datatrove.executor.base:_run_for_rank:85 - Processing done for rank=0
 2024-05-17 07:33:20.417 | INFO     | datatrove.executor.base:_run_for_rank:91 -
                                                                                                                             📉📉📉 Stats: Task 0 📉📉📉
                                                                                                                             Total Runtime: 19 minutes and 27 seconds
-                                                                                                                            📖 - READER: 🕷 Warc
+                                                                                                                            
+📖 - READER: 🕷 Warc
     Runtime: (2.08%) 24 seconds [0.21 milliseconds±0.66 milliseconds/doc]
-    Stats: {input_files: 1, doc_len: 4740085439 [min=1, max=1048576, 138749.10±183114/doc], documents: 34162 [34162.00/input_file]}                                                                                                                     🔻 - FILTER: 😈 Url-filter                                                                                                      Runtime: (0.49%) 5 seconds [0.17 milliseconds±11.06 milliseconds/doc]
-    Stats: {total: 34163, forwarded: 33963, doc_len: 4720996535 [min=1, max=1048576, 139004.11±183434/doc], dropped: 200, dropped_domain: 101, dropped_hard_blacklisted: 75, dropped_blacklisted_subword: 17, dropped_soft_blacklisted: 6, dropped_subdomain: 1}                                                                                                                    🛢 - EXTRAC: ⛏ Trafilatura                                                                                                       Runtime: (90.03%) 17 minutes and 31 seconds [30.96 milliseconds±57.26 milliseconds/doc]
+    Stats: {input_files: 1, doc_len: 4740085439 [min=1, max=1048576, 138749.10±183114/doc], documents: 34162 [34162.00/input_file]}                                                                                                                     
+🔻 - FILTER: 😈 Url-filter                                                                                                      
+    Runtime: (0.49%) 5 seconds [0.17 milliseconds±11.06 milliseconds/doc]
+    Stats: {total: 34163, forwarded: 33963, doc_len: 4720996535 [min=1, max=1048576, 139004.11±183434/doc], dropped: 200, dropped_domain: 101, dropped_hard_blacklisted: 75, dropped_blacklisted_subword: 17, dropped_soft_blacklisted: 6, dropped_subdomain: 1}                                                                                                                    
+🛢 - EXTRAC: ⛏ Trafilatura                                                                                                       
+    Runtime: (90.03%) 17 minutes and 31 seconds [30.96 milliseconds±57.26 milliseconds/doc]
     Stats: {total: 33963, forwarded: 32550, doc_len: 86438862 [min=1, max=601304, 2655.57±13256/doc], dropped: 1413}
-🔻 - FILTER: 🌍 Language ID                                                                                                     Runtime: (1.99%) 23 seconds [0.72 milliseconds±2.44 milliseconds/doc]                                                       Stats: {total: 32550, dropped: 20766, forwarded: 11784, doc_len: 30116540 [min=8, max=292206, 2555.71±6959/doc]}
+🔻 - FILTER: 🌍 Language ID                                                                                                     
+    Runtime: (1.99%) 23 seconds [0.72 milliseconds±2.44 milliseconds/doc]                                                       
+    Stats: {total: 32550, dropped: 20766, forwarded: 11784, doc_len: 30116540 [min=8, max=292206, 2555.71±6959/doc]}
 🔻 - FILTER: 👯 Gopher Repetition
     Runtime: (2.66%) 31 seconds [2.64 milliseconds±6.71 milliseconds/doc]
     Stats: {total: 11784, forwarded: 8545, doc_len: 21903496 [min=8, max=131305, 2563.31±4958/doc], dropped: 3239, dropped_dup_line_frac: 1387, dropped_duplicated_5_n_grams: 336, dropped_top_3_gram: 210, dropped_top_2_gram: 694, dropped_duplicated_6_n_grams: 24, dropped_duplicated_9_n_grams: 16, dropped_top_4_gram: 383, dropped_duplicated_10_n_grams: 27, dropped_dup_line_char_frac: 133, dropped_duplicated_7_n_grams: 14, dropped_duplicated_8_n_grams: 15}
-🔻 - FILTER: 🥇 Gopher Quality                                                                                                  Runtime: (1.42%) 16 seconds [1.94 milliseconds±3.30 milliseconds/doc]
+🔻 - FILTER: 🥇 Gopher Quality                                                                                                  
+    Runtime: (1.42%) 16 seconds [1.94 milliseconds±3.30 milliseconds/doc]
     Stats: {total: 8545, forwarded: 6071, doc_len: 19018684 [min=254, max=131305, 3132.71±5443/doc], dropped: 2474, dropped_gopher_too_many_end_ellipsis: 240, dropped_gopher_short_doc: 1095, dropped_gopher_below_alpha_threshold: 1108, dropped_gopher_enough_stop_words: 20, dropped_gopher_too_many_ellipsis: 2, dropped_gopher_above_avg_threshold: 1, dropped_gopher_too_many_hashes: 2, dropped_gopher_too_many_bullets: 3, dropped_gopher_below_avg_threshold: 3}
 🔻 - FILTER: ⛰ C4 Quality
     Runtime: (0.32%) 3 seconds [0.62 milliseconds±1.02 milliseconds/doc]
@@ -353,14 +375,223 @@ python ./benchmark/bench_xpath.py
 # libxml2从源代码构建
 
 ```bash
-sudo apt install autogen bear
+sudo apt install autoconf libtool bear
 git clone https://github.com/GNOME/libxml2
 # 查询到版本为2.9.13+dfsg-1ubuntu0.4
 dpkg -l | grep libxml2
 git checkout v2.9.13
 CFLAGS='-O2 -fno-semantic-interposition' ./autogen.sh
-bear make
-# TODO
+bear -- make
+make runtest
+./runtest
+make testXPath && LD_LIBRARY_PATH=.libs ./.libs/testXPath -f example_expression.txt
+```
+
+XPath有以下的OP：
+1. END：结束程序
+2. AND：二元操作，布尔值与
+3. OR：二元操作，布尔值或
+4. EQUAL：二元操作，判定相等
+5. CMP：二元操作，比较（大于、小于）
+6. PLUS：二元操作，加法
+7. MULT：二元操作，乘法
+8. UNION：二元操作，面向NodeSet，将第二个参数的Node合并到第一个参数的NodeSet中
+9. ROOT：初始化Value Stack，将document的root加入NodeSet
+10. NODE：将0、1、2个参数求值后，将包含上下文Node的单元素NodeSet推入栈顶
+11. COLLECT
+12. VALUE：将op的value4（第一个指针参数）拷贝一份并推入栈顶
+13. VARIABLE：查找变量表（一个参数为单一名字，两个参数为局部名字+命名空间）
+14. FUNCTION：调用函数
+15. ARG
+16. PREDICATE
+17. FILTER
+18. SORT
+19. RANGETO
+
+## Collect操作
+
+它的collect操作比较复杂，有多个参数
+
+```c
+typedef enum {
+    AXIS_ANCESTOR = 1,
+    AXIS_ANCESTOR_OR_SELF,
+    AXIS_ATTRIBUTE,
+    AXIS_CHILD,
+    AXIS_DESCENDANT,
+    AXIS_DESCENDANT_OR_SELF,
+    AXIS_FOLLOWING,
+    AXIS_FOLLOWING_SIBLING,
+    AXIS_NAMESPACE,
+    AXIS_PARENT,
+    AXIS_PRECEDING,
+    AXIS_PRECEDING_SIBLING,
+    AXIS_SELF
+} xmlXPathAxisVal;
+```
+
+```c
+typedef enum {
+    NODE_TEST_NONE = 0,
+    NODE_TEST_TYPE = 1,
+    NODE_TEST_PI = 2,
+    NODE_TEST_ALL = 3,
+    NODE_TEST_NS = 4,
+    NODE_TEST_NAME = 5
+} xmlXPathTestVal;
+```
+
+```c
+typedef enum {
+    NODE_TYPE_NODE = 0,
+    NODE_TYPE_COMMENT = XML_COMMENT_NODE,
+    NODE_TYPE_TEXT = XML_TEXT_NODE,
+    NODE_TYPE_PI = XML_PI_NODE
+} xmlXPathTypeVal;
+```
+
+## 其他
+
+
+编译后的表达式结构体如下：
+
+```c
+struct _xmlXPathCompExpr {
+    int nbStep;			/* Number of steps in this expression */
+    int maxStep;		/* Maximum number of steps allocated */
+    xmlXPathStepOp *steps;	/* ops for computation of this expression */
+    int last;			/* index of last step in expression */
+    xmlChar *expr;		/* the expression being computed */
+    xmlDictPtr dict;		/* the dictionary to use if any */
+#ifdef DEBUG_EVAL_COUNTS
+    int nb;
+    xmlChar *string;
+#endif
+#ifdef XPATH_STREAMING
+    xmlPatternPtr stream;
+#endif
+};
+```
+
+编译后的表达式是一个树形结构（最多有两个儿子），解释执行从`comp->last`指向的最后一个操作开始，也就是说，最后一个操作是树根。
+以一种递归的方式解释执行任意一棵子树。
+
+执行环境是一个堆栈机，上下文里有一个Stack。
+
+```c
+struct _xmlXPathParserContext {
+    const xmlChar *cur;			/* the current char being parsed */
+    const xmlChar *base;		/* the full expression */
+
+    int error;				/* error code */
+
+    xmlXPathContextPtr  context;	/* the evaluation context */
+    xmlXPathObjectPtr     value;	/* 维护了Stack top（View） */
+    int                 valueNr;	/* 当前Stack大小 */
+    int                valueMax;	/* 当前Stack的容量 */
+    xmlXPathObjectPtr *valueTab;	/* Stack数据结构 */
+
+    xmlXPathCompExprPtr comp;		/* the precompiled expression */
+    int xptr;				/* it this an XPointer expression */
+    xmlNodePtr         ancestor;	/* used for walking preceding axis */
+
+    int              valueFrame;        /* 当前Frame允许的最小Stack长度（避免影响调用者的值） */
+};
+```
+
+除了Value Stack之外还有一个Evaluation Context：
+
+```c
+struct _xmlXPathContext {
+    xmlDocPtr doc;			/* 当前正在处理的document？ */
+    xmlNodePtr node;			/* 当前正在处理的node？ */
+
+    int nb_variables_unused;		/* unused (hash table) */
+    int max_variables_unused;		/* unused (hash table) */
+    xmlHashTablePtr varHash;		/* Hash table of defined variables */
+
+    int nb_types;			/* number of defined types */
+    int max_types;			/* max number of types */
+    xmlXPathTypePtr types;		/* Array of defined types */
+
+    int nb_funcs_unused;		/* unused (hash table) */
+    int max_funcs_unused;		/* unused (hash table) */
+    xmlHashTablePtr funcHash;		/* Hash table of defined funcs */
+
+    int nb_axis;			/* number of defined axis */
+    int max_axis;			/* max number of axis */
+    xmlXPathAxisPtr axis;		/* Array of defined axis */
+
+    /* the namespace nodes of the context node */
+    xmlNsPtr *namespaces;		/* Array of namespaces */
+    int nsNr;				/* number of namespace in scope */
+    void *user;				/* function to free */
+
+    /* extra variables */
+    int contextSize;			/* the context size */
+    int proximityPosition;		/* the proximity position */
+
+    /* extra stuff for XPointer */
+    int xptr;				/* is this an XPointer context? */
+    xmlNodePtr here;			/* for here() */
+    xmlNodePtr origin;			/* for origin() */
+
+    /* the set of namespace declarations in scope for the expression */
+    xmlHashTablePtr nsHash;		/* The namespaces hash table */
+    xmlXPathVariableLookupFunc varLookupFunc;/* variable lookup func */
+    void *varLookupData;		/* variable lookup data */
+
+    /* Possibility to link in an extra item */
+    void *extra;                        /* needed for XSLT */
+
+    /* The function name and URI when calling a function */
+    const xmlChar *function;
+    const xmlChar *functionURI;
+
+    /* function lookup function and data */
+    xmlXPathFuncLookupFunc funcLookupFunc;/* function lookup func */
+    void *funcLookupData;		/* function lookup data */
+
+    /* temporary namespace lists kept for walking the namespace axis */
+    xmlNsPtr *tmpNsList;		/* Array of namespaces */
+    int tmpNsNr;			/* number of namespaces in scope */
+
+    /* error reporting mechanism */
+    void *userData;                     /* user specific data block */
+    xmlStructuredErrorFunc error;       /* the callback in case of errors */
+    xmlError lastError;			/* the last error */
+    xmlNodePtr debugNode;		/* the source node XSLT */
+
+    /* dictionary */
+    xmlDictPtr dict;			/* dictionary if any */
+
+    int flags;				/* flags to control compilation */
+
+    /* Cache for reusal of XPath objects */
+    void *cache;
+
+    /* Resource limits */
+    unsigned long opLimit;
+    unsigned long opCount;
+    int depth;
+};
+```
+
+具体每个操作结构体如下：
+
+```c
+struct _xmlXPathStepOp {
+    xmlXPathOp op;		/* 操作编号 */
+    int ch1;			/* 第一个儿子 */
+    int ch2;			/* 第二个儿子 */
+    int value;
+    int value2;
+    int value3;
+    void *value4;
+    void *value5;
+    xmlXPathFunction cache;
+    void *cacheURI;
+};
 ```
 
 # 相关开源数据集
